@@ -1,0 +1,192 @@
+<?xml   version="1.0" encoding="GBK"?>
+<beans  xmlns="http://www.springframework.org/schema/beans"
+        xmlns:context="http://www.springframework.org/schema/context"
+	    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	    xmlns:amq="http://activemq.apache.org/schema/core"
+	    xmlns:jms="http://www.springframework.org/schema/jms"
+	    xmlns:tx="http://www.springframework.org/schema/tx"
+	    xsi:schemaLocation="http://www.springframework.org/schema/beans   
+        http://www.springframework.org/schema/beans/spring-beans-4.2.xsd   
+        http://www.springframework.org/schema/context   
+        http://www.springframework.org/schema/context/spring-context-4.2.xsd
+        http://www.springframework.org/schema/jms
+        http://www.springframework.org/schema/jms/spring-jms-4.2.xsd
+        http://activemq.apache.org/schema/core
+        http://activemq.apache.org/schema/core/activemq-core-5.9.0.xsd
+        http://www.springframework.org/schema/tx
+        http://www.springframework.org/schema/tx/spring-tx-4.2.xsd">
+	    
+		
+		<description>spring-mq configuration</description>
+		
+		<!-- 重发策略,默认为6最多重发次数=maximumRedeliverie,超过重发次数，消息进入死信队列ACTIMEMQ.DLQ -->
+		<amq:redeliveryPolicy id="redeliveryPolicy" maximumRedeliveries="6"/>
+		
+		<!-- 抓取策略 -->
+		<amq:prefetchPolicy id="prefetchPolicy" queuePrefetch="5" topicPrefetch="5" />
+		
+		<!--  activeMQ连接信息，XA事务-->
+		<amq:xaConnectionFactory
+			id="jmsXaConnectionFactory"
+			brokerURL="${mq.brokerURL}"
+			userName="${mq.userName}"
+			password="${mq.password}"
+			redeliveryPolicy="#redeliveryPolicy"
+			alwaysSessionAsync="false"
+			alwaysSyncSend="true"
+			prefetchPolicy="#prefetchPolicy"/>
+		<bean id="amqConnectionFactory" class="com.atomikos.jms.AtomikosConnectionFactoryBean" init-method="init" destroy-method="close">
+			<property name="uniqueResourceName" value="XAactiveMQ"/>
+			<property name="xaConnectionFactory" ref="jmsXaConnectionFactory"/>
+			<property name="poolSize" value="100"/>
+		</bean>
+		
+		
+		<!-- 非XA事务,使用activemq连接池，由对应的 JMS服务厂商提供
+			<bean id="targetConnectionFactory" class="org.apache.activemq.pool.PooledConnectionFactory"  destroy-method="stop">  
+			    <property name="connectionFactory">  
+			        <bean class="org.apache.activemq.ActiveMQConnectionFactory">  
+			            <property name="brokerURL"  value="${mq.brokerURL}" />  
+			                              超时重发机制，业务端需要处理保证消息不会被重复处理 ，业务逻辑检查checkMessageExist(), 再丢弃这条消息,不再重试
+			      		<property name="closeTimeout" value="${mq.closeTimeout}"/>
+			            <property name="userName" value="${mq.userName}"/>
+			            <property name="password" value="${mq.password}"/>
+			           	 是否使用异步发送，异步效率更高，同步能保证消息不会丢失
+			            <property name="useAsyncSend" value="true" />  
+			          	  如果不设置trustAllPackages，ObjectMessage会出现异常，建议数据之间通过JSON传递
+			            <property name="trustAllPackages" value="true"/> 
+			        </bean>  
+			    </property>  
+			    <property name="maxConnections" value="${mq.maxConnections}"></property>  
+				 </bean>  
+		   		<bean id="connectionFactory" class="org.springframework.jms.connection.SingleConnectionFactory">  
+		        <property name="targetConnectionFactory" ref="targetConnectionFactory"/>  
+	    	</bean> 
+	    -->
+	      
+         <!-- 定义JmsTemplate Queue模板 ，通过@Qualifilter("id")来加载消息模板 -->  
+	     <bean id="jmsQueueTemplate" class="org.springframework.jms.core.JmsTemplate">  
+	        <!-- 这个connectionFactory对应的是我们定义的Spring提供的那个ConnectionFactory对象 
+	        	<property name="connectionFactory" ref="connectionFactory"/>
+	        -->  
+	        <property name="connectionFactory" ref="amqConnectionFactory"/>
+	        <!-- 默认发送地址，用户可以赋值覆盖 --> 
+	        <property name="defaultDestination" ref="queueDestination"/>
+	        <!-- deliveryMode, priority, timeToLive 的开关，要生效，必须配置为true，默认false-->  
+	        <property name="explicitQosEnabled" value="true" /> 
+	        <!-- 发送模式  DeliveryMode.NON_PERSISTENT=1:非持久 ; DeliveryMode.PERSISTENT=2:持久,不管哪种模式，只要被消费者消费了，通过received或者onMessage消费的都会删除该消息，付过没有被消费且消息持久化到kahaDB或者数据系统中，即使宕机重启，未消费的消息还是会显示，知道有消费者处理完消息--> 
+            <property name="deliveryMode" value="2" />
+	        <property name="messageConverter">
+	        	<bean class="org.springframework.jms.support.converter.SimpleMessageConverter"/>
+	        </property>
+	    </bean>  
+       
+       
+	    <!--点对点的消息队列目的地-->  
+	    <bean id="queueDestination" class="org.apache.activemq.command.ActiveMQQueue">  
+	        <constructor-arg value="${queueDestination}"/>
+	    </bean>
+	    <!-- sessionAwareQueue -->
+	    <bean id="sessionAwareQueue" class="org.apache.activemq.command.ActiveMQQueue">
+	    	<constructor-arg value="${sessionAwareQueue}"/>
+	    </bean>
+	    <!-- adapterQueue -->
+	    <bean id="adapterQueue" class="org.apache.activemq.command.ActiveMQQueue">
+	    	<constructor-arg value="${adapterQueue}"/>
+	    </bean>
+	    <!-- 订阅模式消息队列 -->
+	    <bean id="topicDestination" class="org.apache.activemq.command.ActiveMQQueue">
+	   		<constructor-arg  value="topicDestination"/>
+	    </bean>
+	    <!--消息回复统一地址-->  
+	    <bean id="responseDestination" class="org.apache.activemq.command.ActiveMQQueue">  
+	        <constructor-arg value="${responseDestination}"/>
+	    </bean>  
+	    
+	   
+	    <!-- 监听回复的消息 -->
+	    <bean id="responseMessageListener" class="com.github.wangyi.activemq.listener.ResponseMessageListener"></bean> 
+	    <!-- 监听默认的发送地址消息，此处一般进行业务重定向处理 -->  
+	    <bean id="consumerMessageListener" class="com.github.wangyi.activemq.listener.ConsumerMessageListener"></bean>
+	    <!-- 可以获取session的MessageListener -->
+		<bean id="consumerSessionAwareMessageListener" class="com.github.wangyi.activemq.listener.ConsumerSessionAwareMessageListener">
+			<!-- 注入回复消息目的地 -->
+			<property name="destination" ref="responseDestination"/>
+		</bean>
+		<!-- 消息监听适配器 -->
+		<bean id="messageListenerAdapter" class="org.springframework.jms.listener.adapter.MessageListenerAdapter">
+			<property name="delegate">  
+		        <bean class="com.github.wangyi.activemq.listener.ConsumerAdapterListener"/>  
+		    </property>  
+		    <!-- defaultListenerMethod不指定默认执行handleMessage方法 -->
+		    <property name="defaultListenerMethod" value="receiveMessage"/>
+		    <!-- 默认消息返回的地址，如果不指定，则不进行消息的返回 -->
+		    <property name="defaultResponseDestination" ref="responseDestination"/>
+		</bean>
+		
+		<!-- concurrency并发数，设置区间，activemq根据消息规模自动调整并发数 -->
+		
+		<!-- 监听回response复的消息 :destination监听的目的地-->
+		<bean id="responseContainer"  class="org.springframework.jms.listener.DefaultMessageListenerContainer">  
+	     	<property name="errorHandler" ref="someHandler"/>
+	        <property name="connectionFactory" ref="amqConnectionFactory" />  
+	        <property name="destination" ref="responseDestination" />  
+	        <property name="messageListener" ref="responseMessageListener" />  
+	   		<property name="concurrency" value="4-8"/>
+	   		<!-- 消息事务控制，默认是false,如果消息接收失败时会对JMS消息进行回滚，但接收消息跟数据库的事务无法控制
+	     		<property name="sessionTransacted" value="true"/>
+	     	 -->
+	     	 <property name="transactionManager" ref="jtaTransactionManager"/>
+	     	 <!-- acknowledge定义事务，value="1"无事务，value="0"有事务 -->
+	     	 <property name="sessionAcknowledgeMode" value="1"/>
+	    </bean>	
+	    <!-- 监听点queue发送的消息:destination监听的目的地-->  
+	    <bean id="jmsContainer"  class="org.springframework.jms.listener.DefaultMessageListenerContainer">  
+	        <property name="errorHandler" ref="someHandler"/>
+	        <property name="connectionFactory" ref="amqConnectionFactory" />  
+	        <property name="destination" ref="queueDestination" />  
+	        <property name="messageListener" ref="consumerMessageListener" />  
+	    	<property name="concurrency" value="4-8"/>
+	    	<!-- 消息事务控制，默认是false,如果消息接收失败时会对JMS消息进行回滚，但接收消息跟数据库的事务无法控制
+	     		<property name="sessionTransacted" value="true"/>
+	     	 -->
+	     	  <property name="transactionManager" ref="jtaTransactionManager"/>
+	     	 <!-- acknowledge定义事务，value="auto"无事务，value="transactioned"有事务 -->
+	     	 <property name="sessionAcknowledgeMode" value="0"/>
+	     </bean>
+	     <!-- 可获取session的消息监听器 :destination监听的目的地-->
+	     <bean id="sessionAwareListenerContainer" class="org.springframework.jms.listener.DefaultMessageListenerContainer">
+	     	<property name="errorHandler" ref="someHandler"/>
+	     	<property name="connectionFactory" ref="amqConnectionFactory"/>
+	     	<property name="destination" ref="sessionAwareQueue" /> 
+	     	<property name="messageListener"  ref="consumerSessionAwareMessageListener"/>
+	     	<property name="concurrency" value="4-8"/>
+	     	<!-- 消息事务控制，默认是false,如果消息接收失败时会对JMS消息进行回滚，但接收消息跟数据库的事务无法控制
+	     		<property name="sessionTransacted" value="true"/>
+	     	 -->
+	     	  <property name="transactionManager" ref="jtaTransactionManager"/>
+	     	 <!-- acknowledge定义事务，value="auto"无事务，value="transactioned"有事务 -->
+	     	 <property name="sessionAcknowledgeMode" value="0"/>
+	     </bean>
+	     <!-- 消息适配器容器:destination监听的目的地 -->
+	     <bean id="messageListenerAdapterContainer" class="org.springframework.jms.listener.DefaultMessageListenerContainer">
+	     	<property name="errorHandler" ref="someHandler"/>
+	     	<property name="connectionFactory" ref="amqConnectionFactory"/>
+	     	<property name="destination" ref="adapterQueue" /> 
+		    <!-- 使用MessageListenerAdapter来作为消息监听器 -->
+		    <property name="messageListener" ref="messageListenerAdapter"/>
+		    <property name="concurrency" value="4-8"/>
+		    <!-- 消息事务控制，默认是false,如果消息接收失败时会对JMS消息进行回滚，但接收消息跟数据库的事务无法控制
+	     		<property name="sessionTransacted" value="true"/>
+	     	 -->
+	     	 <property name="transactionManager" ref="jtaTransactionManager"/>
+	     	 <!-- acknowledge定义事务，value="auto"无事务，value="transactioned"有事务 -->
+	     	 <property name="sessionAcknowledgeMode" value="0"/>
+	     </bean>
+	     
+	     <!-- 消息处理异常记录日志 -->
+	     <bean id="someHandler" class="com.github.wangyi.activemq.exception.SomeHandler"></bean>
+	     
+	     
+	
+</beans>
